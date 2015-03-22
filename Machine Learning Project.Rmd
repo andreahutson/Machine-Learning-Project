@@ -1,0 +1,89 @@
+---
+title: "Machine Learning Project"
+author: "A.E. Hutson"
+date: "March 20, 2015"
+output: html_document
+---
+
+```{r get data, echo=FALSE, results='hide'}
+library(caret); library(ggplot2);
+setwd("/Users/andreahutson/Dropbox/Classes/Machine Learning Project")
+dataSet <- read.csv("pml-training-2.csv")
+FinalTesting <- read.csv("pml-testing-2.csv")
+```
+## Introduction and Method
+
+This paper is a brief look at the ability of sensors to correctly recognize one of five methods of doing a one-arm barbell curl. Users wore an arm band, glove, and a belt, all with sensors to detect movement (e.g., acceleration, magnetometer, gyro, pitch). 
+
+First, the data must be transformed. An examination of the dataset (using the 'summary' function) revealed that there were many columns with NA values.  There are also columns with timestamps and users names; we don't care about these variables, so why not remove them? 
+```{r clean data, cache=TRUE}
+# Find the variables with NA values
+    excludeVariable <- vector()
+    for (i in 8:(length(dataSet)-1)) { # for each of the columns besides the last
+        if (sum(is.na(dataSet[i] > 0)) > 10000) { # if the number of nas > 10000
+            excludeVariable <- append(excludeVariable, i) # exclude the variable
+            }
+        }
+dataSet <- dataSet[,-excludeVariable]  # create new data set with variable
+dataSet <- dataSet[,8:length(dataSet)]  # remove all of the descriptives
+
+inTrain <- createDataPartition(y=dataSet$classe, p=0.7, list=FALSE)
+train <- dataSet[inTrain, ]
+test <- dataSet[-inTrain, ]
+
+finaltest <- FinalTesting[,-excludeVariable]  # create new data set with variable
+    finaltest <- finaltest[,8:length(finaltest)]  # remove all of the descriptives
+```
+First, we can create a graph of the data using qplot and the two variables with the highest correlation to classe. The graph below shows that there is a lot of overlap between classes on the two top variables.
+```{r, cache=TRUE}
+# Save the correlations between the training variables
+classCorrs <- apply(train ,2, function(col)cor(as.numeric(col), as.numeric(train$classe)))
+# Print the order of the correlations
+order(abs(classCorrs))
+# These two variables have the highest correlations with classe
+classCorrs[41] # pitch_forearm
+classCorrs[24] # magnet_arm_x
+
+qplot(pitch_forearm, magnet_arm_x, color=classe, data=train)
+```
+Let's try to make a model of the data using a classification tree.
+```{r classification tree, cache=TRUE}
+modFit <- train(classe~., method='rpart', data=train)
+
+# This tells what the nodes are and the final splits, and what the probability of being in a class is based on the split.
+print(modFit$finalModel)
+
+# Let's plot it
+plot(modFit$finalModel, uniform=TRUE, main="Classification Tree")
+text(modFit$finalModel, use.n=TRUE, all=TRUE, cex=.8)
+
+# Predict new values -- this will actually write out the class
+testClass <- predict(modFit, newdata=test)
+
+confusionMatrix(testClass,test$classe)  # overall accuracy was 50% 
+```
+The confusion matrix for the simple classification tree model demonstrates that the model was not very accurate at predicting the outcome variable, particularly for type "D".
+
+A random forest model should improve the predictions significantly. A random forest lets you bootstrap samples and variables to grow multiple trees and then pick the best combination of variables.
+```{r random forest, cache=TRUE}
+library(caret)
+# fit model using train, rf=random forest. prox = true produces a bit more info
+modFit <- train(classe ~ ., data=train, method='rf', prox=TRUE)
+```
+
+## Results
+
+The original data set was split into a training set (70% of values) and a testing set (30% of values) so that cross validation could be performed. Let's predict those new values and run them through the confusion matrix.
+``` {r results, cache=TRUE}
+# Predict new values
+testClass <- predict(modFit, newdata=test)
+confusionMatrix(testClass,test$classe)  # overall accuracy was 50% 
+```
+The model appears to be very accurate, with an accuracy rate of 99.3%. The item with the most incorrect prediction was D (incorrectly identified as C about 2% of the time. A plot of the correct and incorrect values is below.
+```{r plot of correct vs incorrect, cache=TRUE}
+test$predCorrect <- testClass==test$classe # code if prediction was right
+# Plot the data again, and color the incorrect points red.
+qplot(pitch_forearm, magnet_arm_x, color=predCorrect, data=test)
+```
+The items that it missed are primarily from 0-50 in pitch_forearm. Possibly adding another sensor to the forearm would help improve accuracy even further.
+
